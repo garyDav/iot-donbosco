@@ -1,0 +1,12 @@
+postgresql_databases:
+  - name: db_donbosco
+    owner: dbuser
+    hstore: yes
+postgresql_users:
+  - name: dbuser
+    pass: dbpass
+    encrypted: no
+postgresql_user_privileges:
+  - name: dbuser
+    db: donbosco
+    priv: "ALL"

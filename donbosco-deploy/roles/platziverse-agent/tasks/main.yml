@@ -1,0 +1,11 @@
+---
+- include: deps.yml
+- name: Copy donbosco-agent
+  copy:
+    src=donbosco-agent
+    dest=/usr/local/src
+    mode=u=rwx,g=rwx,o=rx
+- name: Run npm install
+  command: npm install
+    chdir=/usr/local/src/donbosco-agent
+    creates=/usr/local/src/donbosco-agent/node_modules

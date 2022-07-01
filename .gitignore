@@ -1,1 +1,8 @@
 ssh
+postgres_data
+node_modules
+dist
+.DS_Store
+.env
+Dockerfile
+.dockerignore

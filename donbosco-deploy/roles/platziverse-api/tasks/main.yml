@@ -1,0 +1,28 @@
+---
+- include: deps.yml
+- name: Copying donbosco-api
+  copy:
+    src=donbosco-api
+    dest=/usr/local/src
+    mode=u=rwx,g=rwx,o=rx
+- name: Running npm install
+  command: npm install
+    chdir=/usr/local/src/donbosco-api
+    creates=/usr/local/src/donbosco-api/node_modules
+- name: Install systemd script
+  copy:
+    src=donbosco-api.service
+    dest=/lib/systemd/system
+- name: Install nginx config
+  copy:
+    src=donbosco-api.conf
+    dest=/etc/nginx/sites-enabled
+- name: Start donbosco-api
+  service:
+    name=donbosco-api
+    state=restarted
+    enabled=yes
+- name: Restart nginx
+  service:
+    name=nginx
+    state=reloaded
