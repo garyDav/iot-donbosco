@@ -6,5 +6,12 @@ services:
     image: redis:latest
     ports:
       - "127.0.0.1:6379:6379"
-    logging:
-      driver: none
+  mongo:
+    image: mongo:4.4
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+    ports:
+      - 27017:27017
+    volumes:
+      - ./mongo_data:/data/db

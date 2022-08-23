@@ -1,152 +1,106 @@
 'use strict'
 
-const debug = require('debug')('donbosco:mqtt')
-const mosca = require('mosca')
+const debug = require('debug')('platziverse:mqtt')
 const redis = require('redis')
 const chalk = require('chalk')
-const db = require('donbosco-db')
 
-const { parsePayload } = require('./utils')
+let aedes = require('aedes')
+const mqemitter = require('mqemitter-redis')
+const redisPersistence = require('aedes-persistence-redis')
 
-const backend = {
-  type: 'redis',
-  redis,
-  return_buffers: true
-}
+function startAedes () {
 
-const settings = {
-  port: 1883,
-  backend
-}
+  const port = 1883
 
-const config = {
-  database: process.env.DB_NAME || 'db_donbosco',
-  username: process.env.DB_USER || 'dbuser',
-  password: process.env.DB_PASS || 'dbpass',
-  host: process.env.DB_HOST || 'localhost',
-  dialect: 'postgres',
-  logging: s => debug(s)
-}
-
-const server = new mosca.Server(settings)
-const clients = new Map()
-
-let Agent, Metric
-
-server.on('clientConnected', client => {
-  debug(`Client Connected: ${client.id}`)
-  clients.set(client.id, null)
-})
-
-server.on('clientDisconnected', async (client) => {
-  debug(`Client Disconnected: ${client.id}`)
-  const agent = clients.get(client.id)
-
-  if (agent) {
-    // Mark Agent as Disconnected
-    agent.connected = false
-
-    try {
-      await Agent.createOrUpdate(agent)
-    } catch (e) {
-      return handleError(e)
-    }
-
-    // Delete Agent from Clients List
-    clients.delete(client.id)
-
-    server.publish({
-      topic: 'agent/disconnected',
-      payload: JSON.stringify({
-        agent: {
-          uuid: agent.uuid
-        }
-      })
+  aedes = aedes({
+    mq: mqemitter({
+      port: 6379,
+      host: 'localhost',
+      family: 4
+    }),
+    persistence: redisPersistence({
+     port: 6379,
+      host: 'localhost',
+      family: 4 // 4 (IPv4) or 6 (IPv6)
     })
-    debug(`Client (${client.id}) associated to Agent (${agent.uuid}) marked as disconnected`)
+  })
+
+  const server = require('net').createServer(aedes.handle)
+
+  server.listen(port, function () {
+    console.log(`${chalk.green('[platziverse-mqtt]')} server is running`)
+    aedes.mq.emit({
+      topic: "aedes/hello",
+      payload: "I'm broker " + aedes.id,
+      qos: 0
+    })
+  })
+
+  aedes.mq.on("aedes/hello", (d, cb) => {
+    console.log(d)
+    cb()
+  })
+
+  aedes.on("subscribe", function(subscriptions, client) {
+    console.log(
+      "MQTT client \x1b[32m" +
+        (client ? client.id : client) +
+        "\x1b[0m subscribed to topics: " +
+        subscriptions.map(s => s.topic).join("\n"),
+      "from broker",
+      aedes.id
+    )
+  })
+
+  aedes.on("unsubscribe", function(subscriptions, client) {
+    console.log(
+      "MQTT client \x1b[32m" +
+        (client ? client.id : client) +
+        "\x1b[0m unsubscribed to topics: " +
+        subscriptions.join("\n"),
+      "from broker",
+      aedes.id
+    )
+  })
+
+  // fired when a client connects
+  aedes.on("client", function(client) {
+    console.log(
+      "Client Connected: \x1b[33m" + (client ? client.id : client) + "\x1b[0m",
+      "to broker",
+      aedes.id
+    )
+  })
+
+  // fired when a client disconnects
+  aedes.on("clientDisconnect", function(client) {
+    console.log(
+      "Client Disconnected: \x1b[31m" + (client ? client.id : client) + "\x1b[0m",
+      "to broker",
+      aedes.id
+    )
+  })
+
+  // authentication
+  aedes.authenticate = (client, username, password, callback) => {
+    password = Buffer.from(password, 'base64').toString()
+    if (username === 'xyz' && password === 'xyz123') {
+      return callback(null, true)
+    }
+    const error = new Error('Authentication Failed!! Please enter valid credentials.')
+    console.log('Authentication failed.')
+    return callback(error, false)
   }
-})
-
-server.on('published', async (packet, client) => {
-  debug(`Received: ${packet.topic}`)
-
-  switch (packet.topic) {
-    case 'agent/connected':
-    case 'agent/disconnected':
-      debug(`Payload: ${packet.payload}`)
-      break
-    case 'agent/message':
-      debug(`Payload: ${packet.payload}`)
-
-      const payload = parsePayload(packet.payload)
-
-      if (payload) {
-        payload.agent.connected = true
-
-        let agent
-        try {
-          agent = await Agent.createOrUpdate(payload.agent)
-        } catch (e) {
-          return handleError(e)
-        }
-
-        debug(`Agent ${agent.uuid} saved`)
-
-        // Notify Agent is Connected
-        if (!clients.get(client.id)) {
-          clients.set(client.id, agent)
-          server.publish({
-            topic: 'agent/connected',
-            payload: JSON.stringify({
-              agent: {
-                uuid: agent.uuid,
-                name: agent.name,
-                hostname: agent.hostname,
-                pid: agent.pid,
-                connected: agent.connected
-              }
-            })
-          })
-        }
-
-        // Store Metrics
-        for (let metric of payload.metrics) {
-          let m
-
-          try {
-            m = await Metric.create(agent.uuid, metric)
-          } catch (e) {
-            return handleError(e)
-          }
-
-          debug(`Metric ${m.id} saved on agent ${agent.uuid}`)
-        }
-      }
-      break
+  // authorising client topic to publish a message
+  aedes.authorizePublish = (client, packet, callback) => {
+    if (packet.topic === 'abc') {
+      return callback(new Error('wrong topic'))
+    }
+    if (packet.topic === 'charcha') {
+      packet.payload = Buffer.from('overwrite packet payload')
+    }
+    callback(null)
   }
-})
 
-server.on('ready', async () => {
-  const services = await db(config).catch(handleFatalError)
-
-  Agent = services.Agent
-  Metric = services.Metric
-
-  console.log(`${chalk.green('[donbosco-mqtt]')} server is running`)
-})
-
-server.on('error', handleFatalError)
-
-function handleFatalError (err) {
-  console.error(`${chalk.red('[fatal error]')} ${err.message}`)
-  console.error(err.stack)
-  process.exit(1)
 }
-
-function handleError (err) {
-  console.error(`${chalk.red('[error]')} ${err.message}`)
-  console.error(err.stack)
-}
-
-process.on('uncaughtException', handleFatalError)
-process.on('unhandledRejection', handleFatalError)
+startAedes()

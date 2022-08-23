@@ -20,10 +20,13 @@
     "standard": "^17.0.0"
   },
   "dependencies": {
+    "aedes": "^0.47.0",
+    "aedes-persistence-redis": "^9.0.1",
     "chalk": "^2.1.0",
     "debug": "^3.0.0",
-    "mosca": "^2.5.2",
     "donbosco-db": "file:../donbosco-db",
+    "mosca": "^0.6.0",
+    "mqemitter-redis": "^5.0.0",
     "redis": "^4.1.1"
   }
 }
